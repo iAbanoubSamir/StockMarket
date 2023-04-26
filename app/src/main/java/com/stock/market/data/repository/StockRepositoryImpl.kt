@@ -1,7 +1,9 @@
 package com.stock.market.data.repository
 
+import com.stock.market.data.csv.CSVParser
 import com.stock.market.data.local.StockDatabase
 import com.stock.market.data.mappers.toCompanyListing
+import com.stock.market.data.mappers.toCompanyListingEntity
 import com.stock.market.data.remote.StockApi
 import com.stock.market.domain.model.CompanyListing
 import com.stock.market.domain.repository.StockRepository
@@ -16,7 +18,8 @@ import javax.inject.Singleton
 @Singleton
 class StockRepositoryImpl @Inject constructor(
     val api: StockApi,
-    val db: StockDatabase
+    val db: StockDatabase,
+    val parser: CSVParser<CompanyListing>
 ) : StockRepository {
 
     private val dao = db.dao
@@ -42,11 +45,28 @@ class StockRepositoryImpl @Inject constructor(
 
             val remoteListings = try {
                 val response = api.getListings()
-
+                parser.parse(response.byteStream())
             } catch (e: IOException) {
                 emit(Resource.Error(e.message.toString()))
+                null
             } catch (e: HttpException) {
                 emit(Resource.Error(e.message.toString()))
+                null
+            }
+
+            remoteListings?.let { listings ->
+                dao.clearCompanyListings()
+                dao.insertCompanyListings(
+                    listings.map { it.toCompanyListingEntity() }
+                )
+                emit(
+                    Resource.Success(
+                        data = dao
+                            .searchCompanyListing("")
+                            .map { it.toCompanyListing() }
+                    )
+                )
+                emit(Resource.Loading(false))
             }
         }
     }
